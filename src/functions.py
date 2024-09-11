@@ -4,7 +4,6 @@ import os
 from uuid import uuid4
 from datetime import datetime
 from datetime import timedelta
-import time
 import random
 import uuid
 import logging
@@ -14,7 +13,7 @@ import pyspark.sql.types as t
 import pyspark.sql.functions as f
 
 
-def read_file(spark: SparkSession, file_path: str, file_type: str, schema: t.StructType, options: dict = None):
+def read_file(spark: SparkSession, file_path: str, file_type: str, schema: t.StructType = None, options: dict = None):
     """
     Reads a file into a PySpark DataFrame using a specified schema.
 
@@ -27,20 +26,23 @@ def read_file(spark: SparkSession, file_path: str, file_type: str, schema: t.Str
     """
     
     # Validate file_path
-    try:
-        if not isinstance(file_path, str) or not file_path:
-            raise ValueError("Invalid file path provided.")
+    if not isinstance(file_path, str) or not file_path:
+        raise ValueError("Invalid file path provided.")
 
-        if options is None:
-            options = {}
-        df = (
-            spark
-            .read
-            .format(file_type.lower())
-            .options(**options)
-            .schema(schema)
-            .load(file_path)
-        )
+    if options is None:
+        options = {}
+    reader = (
+        spark
+        .read
+        .format(file_type.lower())
+        .options(**options)
+    )
+    if schema and file_type != "delta":
+        reader = reader.schema(schema)
+    elif not schema and file_type != "delta":
+        reader = reader.option("inferSchema", "true")
+    try:
+        df = reader.load(file_path)
         return df
     except Exception as e:
         raise IOError(f"Error reading {file_path}: {str(e)}") 
@@ -86,15 +88,17 @@ def generate_order_payload(order_details):
         "order_details": order_details
     }
 
-def generate_order_details(df_clients, df_products):
+def generate_order_details(df_clients, df_products, df_packages):
     """
     Generate order details based on client information and item list.
 
     :param df_clients: DataFrame containing client information.
+    :param df_products: DataFrame containing product information.
+    :param df_packages: DataFrame containing package information.
     :return: Dictionary containing order details.
     """
     current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    item_list = generate_item_list(df_products)
+    item_list = generate_item_list(df_products, df_packages)
     client_details = select_client_order_details(df_clients)
 
     return {
@@ -103,7 +107,7 @@ def generate_order_details(df_clients, df_products):
         "order_date": datetime.now().strftime('%Y-%m-%d'),
         "items": item_list,
         "total_amount": generate_item_agg(item_list, "price"),
-        "total_weight": generate_item_agg(item_list, "weight"),
+        "total_volume": generate_item_measure_agg(item_list, "volume"),
         "status": "RECEIVED",
         "destination_address": generate_destination_address_dict(client_details),
         "payment_details": {
@@ -123,18 +127,82 @@ def select_client_order_details(df, primary_key_col="address_id"):
     """
     # Get a list of all primary key values
     primary_keys = df.select(primary_key_col).rdd.flatMap(lambda x: x).collect()
-
     # Randomly select one primary key value
     random_primary_key = random.choice(primary_keys)
-
-    # Randomly select one primary key value
-    random_primary_key = random.choice(primary_keys)
-
     # Filter the DataFrame to get the row with the random primary key
     random_row_df = df.filter(f.col(primary_key_col) == random_primary_key)
-
     # Convert the DataFrame row to dictionary and return
     return random_row_df.first().asDict() if random_row_df else None
+
+def select_product_order_details(df_product, df_package,  quantity=3, primary_key_col="product_id"):
+    """
+    Select a random row from a DataFrame based on a unique primary key column.
+    encapsulated function required by the pyspark UDF. 
+    
+    :param df: DataFrame to select from.
+    :param primary_key_col: Name of the primary key column. default value: product_id
+    :param quantity: Maximum quantity of each product (default: 3).
+    :return: DataFrame containing a single randomly selected row.
+    """
+    def weighted_random_choice(numbers_len):
+        """
+        Select a random number from a range starting from 1 with weights based on reciprocal values.
+
+        Parameters:
+        - numbers_len: Length of the range of numbers starting from 1.
+
+        Returns:
+        - A randomly selected number based on the reciprocal weights.
+        """
+        # Define numbers range starting from 1 to numbers_len
+        numbers = np.arange(1, numbers_len + 1)
+        # Calculate weights based on reciprocal values
+        weights = 1 / numbers
+        # Ensure the weights sum to 1
+        normalized_weights = weights / np.sum(weights)
+        # Select a random number with the specified weights
+        random_number = int(np.random.choice(numbers, p=normalized_weights))
+        
+        return random_number
+    # Get a list of all primary key values
+    primary_keys = df_product.select(primary_key_col).rdd.flatMap(lambda x: x).collect()
+    # Randomly select one primary key value
+    random_primary_key = random.choice(primary_keys)
+    # Register random choice function as a UDF
+    weighted_random_choice_udf = f.udf(lambda x: weighted_random_choice(x), t.IntegerType())
+    # Filter the DataFrame to get the row with the random primary key
+    random_product_df = (
+        df_product
+        .filter(f.col(primary_key_col) == random_primary_key)
+        # Set random product quantity
+        .withColumn("product_quantity", weighted_random_choice_udf(f.lit(quantity)))
+        # Explode package annidations
+        .withColumn("product_components_explode", f.explode(f.col("product_components")))
+        # Extract package information
+        .withColumn("package_id", f.explode(f.col("product_components_explode.package_id")))
+        .withColumn("package_quantity", f.explode(f.col("product_components_explode.package_quantity")))
+        # Rename column
+        .withColumnRenamed("name", "product_name")
+        # Join package measures
+        .join(
+            df_package, on="package_id", how="left"
+        )
+        # Select Columns
+        .select(
+            f.col("product_id"),
+            f.col("product_quantity"),
+            f.col("package_id"),
+            f.col("product_name"),
+            f.col("price"),
+            f.col("package_quantity"),
+            f.col("width"),
+            f.col("height"),
+            f.col("length"),
+            f.col("volume")
+        )
+    )
+    # Convert each DataFrame row to list of dictionary and return
+    return [row.asDict() for row in random_product_df.collect()]
 
 def generate_destination_address_dict(clients_dict):
     """
@@ -149,7 +217,7 @@ def generate_destination_address_dict(clients_dict):
     ]
     return {k: v for k, v in clients_dict.items() if k in address_keys}
 
-def generate_item_list(df_products, items=5, quantity=3):
+def generate_item_list(df_products, df_packages, items=5, quantity=3):
     """
     Generate a list of items with details.
     
@@ -162,14 +230,37 @@ def generate_item_list(df_products, items=5, quantity=3):
     """
     return [
         {
-            "product_id": item["product_id"], 
-            "product_name": item["product_name"], 
-            "price": item["price"], 
-            "weight": item["weight"],
-            "quantity": weighted_random_choice(quantity)
+            "product_id": packages[0]["product_id"], 
+            "product_name": packages[0]["product_name"], 
+            "price": packages[0]["price"],
+            "quantity": packages[0]["product_quantity"],
+            "packages": [
+                {
+                    "package_id": package["package_id"],
+                    "quantity": package["package_quantity"],
+                    "volume": package["volume"]
+                } for package in packages 
+            ],
         }
-        for item in [ select_client_order_details(df_products, primary_key_col="product_id") for num in range(weighted_random_choice(items))]
+        for packages in [select_product_order_details(df_products, df_packages) for num in range(weighted_random_choice(5))]
     ]
+    
+    # return [ 
+    #     package 
+    #     for num in range(weighted_random_choice(5)) 
+    #     for package in select_product_order_details(df_products, df_packages, quantity)
+    # ]
+
+    # return [
+    #     {
+    #         "product_id": item["product_id"], 
+    #         "product_name": item["product_name"], 
+    #         "price": item["price"], 
+    #         "weight": item["weight"],
+    #         "quantity": weighted_random_choice(quantity)
+    #     }
+    #     for item in [ select_client_order_details(df_products, primary_key_col="product_id") for num in range(weighted_random_choice(items))]
+    # ]
 
 def weighted_random_choice(numbers_len):
     """
@@ -205,7 +296,26 @@ def generate_item_agg(items, property_name):
     """
     return sum([(item['quantity'] * item[property_name]) for item in items])
 
-def produce_order(payload):
+def generate_item_measure_agg(items, property_name="volume", quantity="quantity"):
+    """
+    Generate the aggregate value of a specified property for a list of items.
+
+    This function calculates the sum of the product of item quantities, package quantities, 
+    and a specified property (e.g., volume) for each package within each item. 
+    If the specified property is `None`, it is treated as `1` to ensure the multiplication proceeds.
+
+    :param items: List of dictionaries, where each dictionary contains details about an item and its packages.
+    :param quantity: The key name in the dictionaries for the quantity of the item and packages (default is "quantity").
+    :param property_name: The key name in the dictionaries for the property to aggregate (default is "volume").
+    :return: The aggregated value of the specified property.
+    """
+    return sum([
+        item[quantity]* package[quantity] * (package[property_name] if package[property_name] is not None else 1) 
+        for item in items 
+        for package in item['packages']
+    ])
+    
+def produce_order(kinesis_client, stream_name, payload):
     try:
         # Ensure payload is correctly formatted and partition key is a string
         if 'event_type' not in payload or not isinstance(payload['event_type'], str):
@@ -219,8 +329,8 @@ def produce_order(payload):
         )
         
         # Log response details
-        logger.info(f"Put record response: {put_response}")
+        logging.info(f"Put record response: {put_response}")
         return put_response
     except Exception as e:
-        logger.error(f"Failed to put record to stream: {e}", exc_info=True)
-        return None
+        logging.error(f"Failed to put record to stream: {e}", exc_info=True)
+        return None  
