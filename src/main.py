@@ -27,21 +27,36 @@ def setup_logging():
     )  
 
 def load_aws_credentials(profile_name="default"):
-    try:
-        credentials = configparser.ConfigParser()
-        credentials.read(os.path.join(os.path.dirname(__file__), '..', '.aws', 'credentials'))
-        
-        logging.info("Successfully loaded credentials variables from .aws file.")
-    except Exception as e:
-        logging.error(f"Error loading .aws file: {e}")
-        sys.exit(1)
+    # Check the environment flag
+    environment = os.getenv('ENVIRONMENT', 'LOCAL')
 
-    aws_access_key_id = credentials[profile_name]["aws_access_key_id"]
-    aws_secret_access_key = credentials[profile_name]["aws_secret_access_key"]
+    if environment == 'GITHUB_ACTIONS':
+        # Load credentials from environment variables set in GitHub Actions
+        aws_access_key_id = os.getenv('AWS_ACCESS_KEY_ID')
+        aws_secret_access_key = os.getenv('AWS_SECRET_ACCESS_KEY')
 
-    if not aws_access_key_id or not aws_secret_access_key:
-        logging.error("AWS credentials not found.")
-        sys.exit(1)
+        if not aws_access_key_id or not aws_secret_access_key:
+            logging.error("AWS credentials not found in GitHub Actions environment variables.")
+            sys.exit(1)
+
+        logging.info("Successfully loaded credentials from GitHub Actions environment.")
+    else:
+        # Load credentials from the .aws/credentials file (local development)
+        try:
+            credentials = configparser.ConfigParser()
+            credentials.read(os.path.join(os.path.dirname(__file__), '..', '.aws', 'credentials'))
+            
+            logging.info("Successfully loaded credentials variables from .aws file.")
+        except Exception as e:
+            logging.error(f"Error loading .aws file: {e}")
+            sys.exit(1)
+
+        aws_access_key_id = credentials[profile_name]["aws_access_key_id"]
+        aws_secret_access_key = credentials[profile_name]["aws_secret_access_key"]
+
+        if not aws_access_key_id or not aws_secret_access_key:
+            logging.error("AWS credentials not found.")
+            sys.exit(1)
 
     return aws_access_key_id, aws_secret_access_key
 
