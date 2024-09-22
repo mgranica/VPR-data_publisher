@@ -108,6 +108,7 @@ def generate_order_details(df_clients, df_products, df_packages):
         "items": item_list,
         "total_amount": generate_item_agg(item_list, "price"),
         "total_volume": generate_item_measure_agg(item_list, "volume"),
+        "total_weight": generate_item_measure_agg(item_list, "weight"),
         "status": "RECEIVED",
         "destination_address": generate_destination_address_dict(client_details),
         "payment_details": {
@@ -179,25 +180,28 @@ def select_product_order_details(df_product, df_package,  quantity=3, primary_ke
         # Explode package annidations
         .withColumn("product_components_explode", f.explode(f.col("product_components")))
         # Extract package information
-        .withColumn("package_id", f.explode(f.col("product_components_explode.package_id")))
-        .withColumn("package_quantity", f.explode(f.col("product_components_explode.package_quantity")))
+        .withColumn("package_id", f.col("product_components_explode.package_id"))
+        .withColumn("subpackage_id", f.col("product_components_explode.subpackage_id"))
+        .withColumn("package_quantity", f.col("product_components_explode.package_quantity"))
         # Rename column
         .withColumnRenamed("name", "product_name")
         # Join package measures
         .join(
-            df_package, on="package_id", how="left"
+            df_package, on=["package_id", "subpackage_id"], how="left"
         )
         # Select Columns
         .select(
             f.col("product_id"),
             f.col("product_quantity"),
             f.col("package_id"),
+            f.col("subpackage_id"),
             f.col("product_name"),
             f.col("price"),
             f.col("package_quantity"),
             f.col("width"),
             f.col("height"),
             f.col("length"),
+            f.col("weight"),
             f.col("volume")
         )
     )
@@ -237,7 +241,9 @@ def generate_item_list(df_products, df_packages, items=5, quantity=3):
             "packages": [
                 {
                     "package_id": package["package_id"],
+                    "subpackage_id": package["subpackage_id"],
                     "quantity": package["package_quantity"],
+                    'weight': package["weight"],
                     "volume": package["volume"]
                 } for package in packages 
             ],

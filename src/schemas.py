@@ -33,23 +33,24 @@ gold_products_schema = t.StructType([
     t.StructField('url', t.StringType(), True), 
     t.StructField('price', t.FloatType(), True), 
     t.StructField('currency', t.StringType(), True), 
-    # t.StructField('product_components', t.ArrayType(
-    #     t.MapType(t.StringType(), t.IntegerType(), True), False), False)
     t.StructField(
         'product_components', t.ArrayType(
             t.StructType([
-                t.StructField('package_id', t.StringType(), True), 
+                t.StructField('package_id', t.StringType(), True),
+                t.StructField('subpackage_id', t.IntegerType(), True),
                 t.StructField('package_quantity', t.IntegerType(), True)
             ]),
         False), False)
 ])
 
 gold_packages_schema =t.StructType([
-    t.StructField('package_id', t.StringType(), True), 
-    t.StructField('name', t.StringType(), True), 
-    t.StructField('width', t.IntegerType(), True), 
-    t.StructField('height', t.IntegerType(), True), 
-    t.StructField('length', t.IntegerType(), True), 
-    t.StructField('volume', t.IntegerType(), True), 
+    t.StructField('package_id', t.StringType(), True),
+    t.StructField('subpackage_id', t.IntegerType(), True),
+    t.StructField('name', t.StringType(), True),
+    t.StructField('width', t.IntegerType(), True),
+    t.StructField('height', t.IntegerType(), True),
+    t.StructField('length', t.IntegerType(), True),
+    t.StructField('weight', t.FloatType(), True), 
+    t.StructField('volume', t.IntegerType(), True),
     t.StructField('stock_quantity', t.IntegerType(), False)
 ])

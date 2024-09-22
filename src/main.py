@@ -3,8 +3,6 @@ import configparser
 import argparse
 import os
 import time
-import yaml
-import json
 import logging
 import boto3
 
@@ -151,7 +149,6 @@ def create_kinesis_client(aws_access_key_id, aws_secret_access_key, region_name,
         raise Exception(f"BotoCoreError: An error occurred while creating the Kinesis client - {str(e)}")
     except boto3.exceptions.ClientError as e:
         raise Exception(f"ClientError: An error occurred with the AWS credentials or region - {str(e)}")
-  
 
 
 def main():
