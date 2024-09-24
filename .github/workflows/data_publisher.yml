@@ -1,4 +1,4 @@
-name: Data Landing
+name: Data Publisher
 
 on:
     # Trigger on push to the main branch
