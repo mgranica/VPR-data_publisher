@@ -327,10 +327,10 @@ def produce_order(kinesis_client, stream_name, payload):
         if 'event_type' not in payload or not isinstance(payload['event_type'], str):
             raise ValueError("Payload must include 'event_type' as a string")
         
-        data = json.dumps(payload)
+        data = json.dumps(payload).encode("utf-8")
         put_response = kinesis_client.put_record(
             StreamName=stream_name,
-            Data=f"{data}\n",
+            Data=data,
             PartitionKey=payload['event_type']
         )
         
