@@ -1,7 +1,3 @@
-Here's a detailed `README.md` for your Data Publisher app, explaining its components and how to use it, including setup, usage, and a brief description of each part of the application:
-
----
-
 # Data Publisher Application
 
 ## Overview
@@ -25,14 +21,14 @@ The project is managed using **Poetry** for dependency management and packaging.
 ### 1. Install Poetry
 First, ensure Poetry is installed. If not, you can install it using the command:
 ```bash
-curl -sSL https://install.python-poetry.org | python3 -
+pip install poetry
 ```
 
 ### 2. Clone the Repository
 Clone the project repository to your local machine:
 ```bash
-git clone <repository-url>
-cd <repository-folder>
+git clone https://github.com/mgranica/VPR-data_publisher.git
+cd https://github.com/mgranica/VPR-data_publisher.git
 ```
 
 ### 3. Install Dependencies
