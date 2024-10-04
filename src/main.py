@@ -8,7 +8,7 @@ import boto3
 
 from spark_session import create_spark_session
 from schemas import gold_clients_address_schema, orders_delta_schema
-from functions import read_file, generate_order_payload, generate_order_details, produce_order, produce_delta_order
+from functions import read_file, generate_order_payload, generate_order_details, produce_delta_order
 
 
 def setup_logging():
