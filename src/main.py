@@ -7,8 +7,8 @@ import logging
 import boto3
 
 from spark_session import create_spark_session
-from schemas import gold_clients_address_schema
-from functions import read_file, generate_order_payload, generate_order_details, produce_order
+from schemas import gold_clients_address_schema, orders_delta_schema
+from functions import read_file, generate_order_payload, generate_order_details, produce_order, produce_delta_order
 
 
 def setup_logging():
@@ -121,34 +121,6 @@ def read_dataframes(spark, config, bucket_name, layer="gold_paths"):
         return df_clients_address, df_products, df_packages
     except Exception as e:
         raise Exception(f"An unexpected error occurred: {str(e)}")
-    
-def create_kinesis_client(aws_access_key_id, aws_secret_access_key, region_name, aws_session_token=None):
-    """
-    Creates a Kinesis client using the provided AWS credentials.
-
-    :params aws_access_key_id (str): AWS access key ID.
-    :params aws_secret_access_key (str): AWS secret access key.
-    :params region_name (str): AWS region where the Kinesis stream is located.
-    :params aws_session_token (str, optional): AWS session token for temporary credentials. Defaults to None.
-
-    :Returns: botocore.client.Kinesis: A Kinesis client instance.
-
-    :Raises: botocore.exceptions.BotoCoreError: If an error occurs while creating the client.
-    :Raises: botocore.exceptions.ClientError: If there's an error with the AWS credentials or region.
-    """
-    try:
-        kinesis_client = boto3.client(
-            'kinesis',
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            aws_session_token=aws_session_token,
-            region_name=region_name
-        )
-        return kinesis_client
-    except boto3.exceptions.BotoCoreError as e:
-        raise Exception(f"BotoCoreError: An error occurred while creating the Kinesis client - {str(e)}")
-    except boto3.exceptions.ClientError as e:
-        raise Exception(f"ClientError: An error occurred with the AWS credentials or region - {str(e)}")
 
 
 def main():
@@ -164,19 +136,20 @@ def main():
 
     bucket_name = aws_config["paths"]["BUCKET_NAME"]
     region_name = aws_config["default"]["REGION"]
-    stream_name = aws_config["default"]["STREAM_NAME"]
+    # stream_name = aws_config["default"]["STREAM_NAME"]
+    orders_stream_path = os.path.join(
+        bucket_name, aws_config["paths"]["ORDERS"], aws_config["format"]["delta"], aws_config["default"]["STREAM_NAME"]
+    )
     # Create Spark session
     spark = create_spark_session(aws_access_key_id, aws_secret_access_key)
     # Read Dataframes
     df_clients_address ,df_products , df_packages = read_dataframes(spark, aws_config, bucket_name)
-    # Kinesis 
-    kinesis_client = create_kinesis_client(aws_access_key_id, aws_secret_access_key, region_name)
     # Generate payload
     for order in range(1, args.num_orders + 1):
         try:
             order_details = generate_order_details(df_clients_address, df_products, df_packages)
             order_payload = generate_order_payload(order_details)
-            produce_order(kinesis_client, stream_name, order_payload)
+            produce_delta_order(spark, order_payload, orders_delta_schema, orders_stream_path)
             time.sleep(10)  # Consider making 20 a configurable parameter if needed.
         except Exception as e:
             logging.error(f"Error processing order {order}: {e}")

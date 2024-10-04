@@ -250,23 +250,6 @@ def generate_item_list(df_products, df_packages, items=5, quantity=3):
         }
         for packages in [select_product_order_details(df_products, df_packages) for num in range(weighted_random_choice(5))]
     ]
-    
-    # return [ 
-    #     package 
-    #     for num in range(weighted_random_choice(5)) 
-    #     for package in select_product_order_details(df_products, df_packages, quantity)
-    # ]
-
-    # return [
-    #     {
-    #         "product_id": item["product_id"], 
-    #         "product_name": item["product_name"], 
-    #         "price": item["price"], 
-    #         "weight": item["weight"],
-    #         "quantity": weighted_random_choice(quantity)
-    #     }
-    #     for item in [ select_client_order_details(df_products, primary_key_col="product_id") for num in range(weighted_random_choice(items))]
-    # ]
 
 def weighted_random_choice(numbers_len):
     """
@@ -321,22 +304,24 @@ def generate_item_measure_agg(items, property_name="volume", quantity="quantity"
         for package in item['packages']
     ])
     
-def produce_order(kinesis_client, stream_name, payload):
+def produce_delta_order(spark: SparkSession, data: dict, schema, s3_path: str):
+    """
+    This function converts a JSON dictionary into a PySpark DataFrame and saves it as a Delta table in S3.
+
+    Parameters:
+    - spark (SparkSession): The active Spark session.
+    - data (dict): The JSON data to be saved as a Delta table.
+    - schema (StructType): The schema of the DataFrame.
+    - s3_path (str): The S3 path where the Delta table will be saved.
+    """
     try:
-        # Ensure payload is correctly formatted and partition key is a string
-        if 'event_type' not in payload or not isinstance(payload['event_type'], str):
-            raise ValueError("Payload must include 'event_type' as a string")
-        
-        data = json.dumps(payload).encode("utf-8")
-        put_response = kinesis_client.put_record(
-            StreamName=stream_name,
-            Data=data,
-            PartitionKey=payload['event_type']
-        )
-        
-        # Log response details
-        logging.info(f"Put record response: {put_response}")
-        return put_response
+        # Convert the dictionary into a DataFrame
+        df = spark.createDataFrame([data], schema=schema)
+        order_id = data["order_id"]
+        # Save the DataFrame as a Delta table
+        df.write.format("delta").mode("append").save(s3_path)
+        logging.info(f"Order {order_id}: successfully saved to {s3_path}")
+
     except Exception as e:
-        logging.error(f"Failed to put record to stream: {e}", exc_info=True)
-        return None  
+        raise RuntimeError(f"Failed to save data to Delta table: {e}")
+    
